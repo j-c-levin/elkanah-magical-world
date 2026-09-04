@@ -7,9 +7,12 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Elkanah's World">
+<meta name="apple-mobile-web-app-title" content="Elkanah">
 <title>Elkanah's Magical World</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👑</text></svg>">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+<link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;800&display=swap" rel="stylesheet">
 <style>
@@ -692,6 +695,7 @@
   <button class="round-btn" id="homeBtn" hidden aria-label="Go home">🏠</button>
   <span></span>
   <div style="display:flex; gap:14px; align-items:center;">
+    <button class="round-btn" id="voiceBtn" aria-label="Change the speaking voice" title="Change voice">🗣️</button>
     <button class="round-btn" id="muteBtn" aria-label="Sound on or off">🔊</button>
     <button class="jar" id="jar" aria-label="Sparkle jar">
       <div class="fill" id="jarFill"></div>
@@ -1010,6 +1014,16 @@
   const wait = ms => new Promise(r => setTimeout(r, ms));
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+  // SVG elements have no offsetWidth, so reflow via getBoundingClientRect
+  function replay(el, cls) {
+    el.classList.remove(cls);
+    void el.getBoundingClientRect();
+    el.classList.add(cls);
+  }
+  function clearOnEnd(el, cls, name) {
+    el.addEventListener('animationend', e => { if (e.animationName === name) el.classList.remove(cls); });
+  }
+
   const store = {
     get(k, d) { try { const v = localStorage.getItem('elkanah.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
     set(k, v) { try { localStorage.setItem('elkanah.' + k, JSON.stringify(v)); } catch {} }
@@ -1064,28 +1078,58 @@
 
   /* ---------------- Speech ---------------- */
   let voice = null;
-  function loadVoice() {
+  let voiceList = [];
+  const FEMALE = /female|sonia|libby|maisie|hollie|kate|serena|stephanie|martha|moira|fiona|samantha|karen|nicky|ava|zoe|allison|susan|jenny|aria|zira|hazel|catherine|tessa|shelley|sandy|flo|kathy|princess|victoria|vicki|emma|olivia|amy|joanna|sophie|isabella|jane|lucy|anna|ella|clara|mia/i;
+  const MALE = /\bmale\b|daniel|arthur|oliver|fred|alex\b|rishi|aaron|gordon|thomas|ryan|guy|george|james|david|mark|jamie|eddy|reed|rocko|grandpa|bruce|lee|matthew|brian|joey|justin|kevin|liam|noah|william|oscar|jack|harry|bahh|bells|boing|bubbles|cellos|good news|bad news|jester|organ|trinoids|whisper|wobble|zarvox|albert|junior|ralph|superstar|deranged|hysterical/i;
+  function rankVoice(v) {
+    const n = v.name;
+    let s = 0;
+    if (/natural/i.test(n)) s += 100;
+    if (/google/i.test(n)) s += 80;
+    if (/enhanced|premium/i.test(n)) s += 60;
+    if (/en-GB/i.test(v.lang)) s += 30;
+    if (/en-(IE|AU|NZ)/i.test(v.lang)) s += 12;
+    if (FEMALE.test(n)) s += 25;
+    if (MALE.test(n)) s -= 200;
+    if (/compact|eloquence|novelty/i.test(n)) s -= 100;
+    return s;
+  }
+  function shortVoiceName(v) {
+    const base = v.name.replace(/\(.*$/, '').replace(/-\s*english.*$/i, '');
+    return base.replace(/microsoft|google|apple|online|natural|enhanced|premium|english|\b(en|gb)\b/gi, '').replace(/\s+/g, ' ').trim() || base.trim() || v.name;
+  }
+  function loadVoices() {
     if (!('speechSynthesis' in window)) return;
-    const voices = speechSynthesis.getVoices();
-    if (!voices.length) return;
-    voice =
-      voices.find(v => /en-GB/i.test(v.lang) && /female|kate|serena|martha|libby|sonia/i.test(v.name)) ||
-      voices.find(v => /en-GB/i.test(v.lang)) ||
-      voices.find(v => /^en/i.test(v.lang) && /female|samantha|karen|moira|zira|jenny|aria/i.test(v.name)) ||
-      voices.find(v => /^en/i.test(v.lang)) || voices[0];
+    const all = speechSynthesis.getVoices();
+    if (!all.length) return;
+    voiceList = all.filter(v => /^en/i.test(v.lang)).sort((a, b) => rankVoice(b) - rankVoice(a));
+    if (!voiceList.length) voiceList = all.slice();
+    const wanted = store.get('voice', null);
+    voice = voiceList.find(v => v.name === wanted) || voiceList[0];
   }
   if ('speechSynthesis' in window) {
-    loadVoice();
-    speechSynthesis.onvoiceschanged = loadVoice;
+    loadVoices();
+    speechSynthesis.onvoiceschanged = loadVoices;
   }
   function say(text) {
     if (muted || !('speechSynthesis' in window)) return;
     speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
-    if (voice) u.voice = voice;
-    u.pitch = 1.15; u.rate = .95; u.volume = 1;
+    if (voice) { u.voice = voice; u.lang = voice.lang; }
+    u.pitch = 1.05; u.rate = .95; u.volume = 1;
     speechSynthesis.speak(u);
   }
+
+  $('#voiceBtn').addEventListener('click', () => {
+    if (!voiceList.length) loadVoices();
+    if (!voiceList.length) { tell('No voices', null); return; }
+    const i = voiceList.indexOf(voice);
+    voice = voiceList[(i + 1) % voiceList.length];
+    store.set('voice', voice.name);
+    if (muted) { muted = false; store.set('muted', false); renderMute(); }
+    const name = shortVoiceName(voice);
+    tell(`${name} (${i + 2 > voiceList.length ? 1 : i + 2}/${voiceList.length})`, `Hello Elkanah! My name is ${name}. Let's play!`);
+  });
 
   function tell(text, spoken = text) {
     const el = $('#msg');
@@ -1312,7 +1356,7 @@
       burst(r.left + r.width / 2, r.top + r.height / 2, { count: 18, colors: ['#5DF2E6', '#fff', '#8FD8FF'], shapes: ['dot'], gravity: -.05 });
       spawnBubbles(r.left + r.width / 2, r.top + r.height / 2, 6);
       sfx.pop();
-      f.classList.remove('spun'); void f.offsetWidth; f.classList.add('spun');
+      replay(f, 'spun');
       f.style.animationDuration = Math.max(5, dur / 3) + 's';
       if (Math.random() < .12) awardStar(r.left + r.width / 2, r.top);
     });
@@ -1379,7 +1423,7 @@
 
   $('#mermaid').addEventListener('click', () => {
     const m = $('#mermaid');
-    m.classList.remove('sing'); void m.offsetWidth; m.classList.add('sing');
+    replay(m, 'sing');
     sfx.song();
     const r = m.getBoundingClientRect();
     burst(r.left + r.width * .5, r.top + r.height * .3, { count: 30, colors: ['#5DF2E6', '#FF7EB6', '#fff'], shapes: ['heart', 'star'], gravity: -.02 });
@@ -1446,7 +1490,7 @@
 
   let lastTwirlStar = 0;
   function twirl() {
-    princess.classList.remove('twirl'); void princess.offsetWidth; princess.classList.add('twirl');
+    replay(princess, 'twirl');
     sfx.fanfare();
     const pr = princess.getBoundingClientRect();
     const cx = pr.left + pr.width / 2, cy = pr.top + pr.height / 2;
@@ -1459,6 +1503,11 @@
   }
   $('#twirlBtn').addEventListener('click', twirl);
   princess.addEventListener('click', twirl);
+  clearOnEnd(princess, 'twirl', 'twirl');
+  clearOnEnd($('#unicorn'), 'jump', 'uniJump');
+  clearOnEnd($('#unicorn'), 'munch', 'munch');
+  clearOnEnd($('#mermaid'), 'sing', 'tailFlick');
+  clearOnEnd($('#paperWrap'), 'tada', 'tada');
 
   const COMPLIMENTS = [
     'Mirror mirror on the wall, Elkanah is the kindest of them all!',
@@ -1516,7 +1565,7 @@
   }
 
   unicorn.addEventListener('click', () => {
-    unicorn.classList.remove('jump'); void unicorn.offsetWidth; unicorn.classList.add('jump');
+    replay(unicorn, 'jump');
     sfx.neigh();
     const r = unicorn.getBoundingClientRect();
     for (let i = 0; i < 5; i++) setTimeout(() => burst(r.left + r.width / 2 + rand(-80, 80), r.top + r.height - 20, { count: 14, speed: 4, gravity: -.02 }), i * 120);
@@ -1541,7 +1590,7 @@
     }));
     setTimeout(() => {
       fly.remove();
-      unicorn.classList.remove('munch'); void unicorn.offsetWidth; unicorn.classList.add('munch');
+      replay(unicorn, 'munch');
       sfx.munch();
       burst(m.x, m.y, { count: 20, colors: ['#FF7EB6', '#FF6B6B', '#fff'], shapes: ['heart'], speed: 4, gravity: -.04 });
       say(pick(['Yum yum yum!', 'Delicious! Thank you Elkanah!', 'Crunch crunch! Mmm!', 'That was a tasty apple!']));
@@ -1552,7 +1601,7 @@
 
   $('#rainbowBtn').addEventListener('click', () => {
     const rb = $('#rainbow');
-    rb.classList.remove('draw'); void rb.offsetWidth; rb.classList.add('draw');
+    replay(rb, 'draw');
     sfx.scale();
     tell('Rainbow!', pick(['A beautiful rainbow!', 'Red, orange, yellow, green, blue, indigo, violet!', 'Look at all the colours!']));
     for (let i = 0; i < 8; i++) setTimeout(() => burst(rand(innerWidth * .2, innerWidth * .8), rand(innerHeight * .1, innerHeight * .4), { count: 20, speed: 5, gravity: .04 }), i * 250);
@@ -1699,7 +1748,7 @@
   }));
 
   $('#tadaBtn').addEventListener('click', () => {
-    paperWrap.classList.remove('tada'); void paperWrap.offsetWidth; paperWrap.classList.add('tada');
+    replay(paperWrap, 'tada');
     sfx.fanfare();
     const r = paper.getBoundingClientRect();
     for (let i = 0; i < 8; i++) setTimeout(() => burst(rand(r.left, r.right), rand(r.top, r.bottom), { count: 30, speed: 7 }), i * 150);
@@ -1734,6 +1783,10 @@
   document.addEventListener('contextmenu', e => e.preventDefault());
   document.addEventListener('gesturestart', e => e.preventDefault());
   document.addEventListener('touchmove', e => { if (!e.target.closest('.palette')) e.preventDefault(); }, { passive: false });
+
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+    addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  }
 })();
 </script>
 </body>
