@@ -1084,6 +1084,7 @@
   function rankVoice(v) {
     const n = v.name;
     let s = 0;
+    if (/^moira\b/i.test(n)) s += 500;
     if (/natural/i.test(n)) s += 100;
     if (/google/i.test(n)) s += 80;
     if (/enhanced|premium/i.test(n)) s += 60;
